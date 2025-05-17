@@ -26,21 +26,25 @@ console.log('DOCKER_SOCKET:', process.env.DOCKER_SOCKET);
 const app = express();
 const server = http.createServer(app);
 // Get frontend URL from environment variables
-const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+const frontendUrl = process.env.FRONTEND_URL || '*';
+
+// For development and testing, allow requests from any origin
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl, etc)
+    if (!origin) return callback(null, true);
+    callback(null, true);
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: true
+};
 
 const io = new Server(server, {
-  cors: {
-    origin: frontendUrl,
-    methods: ['GET', 'POST'],
-    credentials: true
-  }
+  cors: corsOptions
 });
 
 // Middleware
-app.use(cors({
-  origin: frontendUrl,
-  credentials: true
-}));
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Health check endpoint
