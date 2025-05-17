@@ -1,0 +1,106 @@
+import express from 'express';
+import http from 'http';
+import { Server } from 'socket.io';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import { v4 as uuidv4 } from 'uuid';
+// Import mock Docker service instead of real Docker service
+// Comment out the real Docker service import
+// import { executeCode } from './docker-service.js';
+import { executeCode } from './mock-docker-service.js';
+// Import mock terminal service instead of real terminal service
+// Comment out the real terminal service import
+// import { setupTerminal } from './terminal-service.js';
+import { setupTerminal } from './mock-terminal-service.js';
+
+// Load environment variables
+dotenv.config();
+
+// Log environment variables (for debugging)
+console.log('Environment variables loaded:');
+console.log('PORT:', process.env.PORT);
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('FRONTEND_URL:', process.env.FRONTEND_URL);
+console.log('DOCKER_SOCKET:', process.env.DOCKER_SOCKET);
+
+const app = express();
+const server = http.createServer(app);
+// Get frontend URL from environment variables
+const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+const io = new Server(server, {
+  cors: {
+    origin: frontendUrl,
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
+});
+
+// Middleware
+app.use(cors({
+  origin: frontendUrl,
+  credentials: true
+}));
+app.use(express.json());
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ status: 'ok', message: 'Server is running' });
+});
+
+// Execute code endpoint
+app.post('/api/execute', async (req, res) => {
+  try {
+    const { code, language, input } = req.body;
+    
+    if (!code || !language) {
+      return res.status(400).json({ error: 'Code and language are required' });
+    }
+    
+    const executionId = uuidv4();
+    
+    // Send initial response with execution ID
+    res.status(202).json({ 
+      executionId,
+      message: 'Code execution started' 
+    });
+    
+    console.log(`Executing ${language} code with input: ${input ? 'provided' : 'none'}`);
+    
+    // Execute code asynchronously with user input
+    const result = await executeCode(code, language, input);
+    
+    // Result will be sent via WebSocket
+    io.to(executionId).emit('execution_result', result);
+  } catch (error) {
+    console.error('Error executing code:', error);
+    res.status(500).json({ error: 'Failed to execute code' });
+  }
+});
+
+// WebSocket connection
+io.on('connection', (socket) => {
+  console.log('Client connected:', socket.id);
+  
+  // Join execution room
+  socket.on('join_execution', (executionId) => {
+    socket.join(executionId);
+    console.log(`Socket ${socket.id} joined execution ${executionId}`);
+  });
+  
+  // Setup terminal connection
+  setupTerminal(socket);
+  
+  // Handle disconnection
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
+  });
+});
+
+// Start server
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+
+export default app;
