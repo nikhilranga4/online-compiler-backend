@@ -5,6 +5,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 import codeRoutes from './routes/code-routes.js';
+import authRoutes from './routes/auth-routes.js';
 // Import mock Docker service instead of real Docker service
 // Comment out the real Docker service import
 // import { executeCode } from './docker-service.js';
@@ -50,6 +51,7 @@ app.use(express.json());
 
 // Register routes
 app.use('/api', codeRoutes);
+app.use('/api', authRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
