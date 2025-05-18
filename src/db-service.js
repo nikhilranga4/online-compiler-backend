@@ -27,7 +27,7 @@ const CODE_SNIPPETS_COLLECTION = 'code-snippets';
 /**
  * Connect to MongoDB
  */
-async function connectToDatabase() {
+export async function connectToDatabase() {
   try {
     await client.connect();
     console.log('Connected to MongoDB');
