@@ -21,6 +21,288 @@ try {
 }
 
 /**
+ * Handle JavaScript code with input
+ */
+async function handleJavaScriptInput(code, input) {
+  // Replace console.readline or similar with the input value
+  const processedCode = code
+    .replace(/const\s+([\w]+)\s*=\s*require\(['"]\.?\.?\/readline['"]\).*/, '')
+    .replace(/const\s+([\w]+)\s*=\s*prompt\([^)]*\)/g, (match, varName) => `const ${varName} = "${input}"`)
+    .replace(/([\w]+)\.question\([^,]+,\s*\(([\w]+)\)\s*=>\s*\{/, (match, rl, answer) => {
+      return `const ${answer} = "${input}";
+{`;
+    });
+
+  // Execute the code and capture output
+  let output = '';
+  const originalConsoleLog = console.log;
+  console.log = (...args) => {
+    output += args.join(' ') + '\n';
+    originalConsoleLog(...args);
+  };
+
+  try {
+    // Use a safer approach than eval
+    const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+    await new AsyncFunction(processedCode)();
+  } catch (error) {
+    output += `Error: ${error.message}\n`;
+    return { output, exitCode: 1, status: 'error' };
+  } finally {
+    console.log = originalConsoleLog;
+  }
+
+  return { output, exitCode: 0, status: 'success' };
+}
+
+/**
+ * Handle Python code with input
+ */
+async function handlePythonInput(code, input) {
+  // Check for input() function calls
+  const inputPattern = /input\s*\(([^)]*)\)/g;
+  const inputs = input.split('\n');
+  let inputIndex = 0;
+  
+  // Replace input() with the actual input value
+  const processedCode = code.replace(inputPattern, (match, prompt) => {
+    const currentInput = inputs[inputIndex] || '';
+    inputIndex++;
+    return `"${currentInput}"  # ${prompt}`;
+  });
+
+  // Simulate Python execution
+  let output = '';
+  const lines = processedCode.split('\n');
+  let variables = {};
+  
+  try {
+    for (const line of lines) {
+      // Skip comments and empty lines
+      if (line.trim().startsWith('#') || !line.trim()) continue;
+      
+      // Handle print statements
+      if (line.trim().startsWith('print(')) {
+        const printMatch = line.match(/print\s*\((.*)\)/);
+        if (printMatch) {
+          let content = printMatch[1].trim();
+          
+          // Handle string literals
+          if ((content.startsWith('"') && content.endsWith('"')) ||
+              (content.startsWith('\'') && content.endsWith('\'')))
+          {
+            content = content.substring(1, content.length - 1);
+            output += content + '\n';
+          }
+          // Handle variable references
+          else if (variables[content]) {
+            output += variables[content] + '\n';
+          }
+          // Handle f-strings (basic implementation)
+          else if (content.startsWith('f')) {
+            let fstring = content.substring(1);
+            if ((fstring.startsWith('"') && fstring.endsWith('"')) ||
+                (fstring.startsWith('\'') && fstring.endsWith('\'')))
+            {
+              fstring = fstring.substring(1, fstring.length - 1);
+              // Replace {varName} with variable values
+              fstring = fstring.replace(/\{([^}]*)\}/g, (match, varName) => {
+                return variables[varName.trim()] || '';
+              });
+              output += fstring + '\n';
+            }
+          }
+          else {
+            output += content + '\n';
+          }
+        }
+      }
+      // Handle variable assignments
+      else if (line.includes('=')) {
+        const assignMatch = line.match(/([\w]+)\s*=\s*(.*)/);
+        if (assignMatch) {
+          const varName = assignMatch[1].trim();
+          let value = assignMatch[2].trim();
+          
+          // Handle string literals in assignments
+          if ((value.startsWith('"') && value.endsWith('"')) ||
+              (value.startsWith('\'') && value.endsWith('\'')))
+          {
+            value = value.substring(1, value.length - 1);
+          }
+          // Handle numeric values
+          else if (!isNaN(value)) {
+            value = parseFloat(value);
+          }
+          
+          variables[varName] = value;
+        }
+      }
+    }
+  } catch (error) {
+    output += `Error: ${error.message}\n`;
+    return { output, exitCode: 1, status: 'error' };
+  }
+
+  return { output, exitCode: 0, status: 'success' };
+}
+
+/**
+ * Handle Java code with input
+ */
+async function handleJavaInput(code, input) {
+  // Replace Scanner input with the actual input value
+  const scannerPattern = /new\s+Scanner\s*\(System\.in\)/;
+  const nextPattern = /([\w]+)\.next(Line|Int|Double|Float|Boolean)?\(\)/g;
+  
+  let processedCode = code;
+  if (scannerPattern.test(code)) {
+    const inputs = input.split('\n');
+    let inputIndex = 0;
+    
+    processedCode = code.replace(nextPattern, (match, scanner, type) => {
+      const currentInput = inputs[inputIndex] || '';
+      inputIndex++;
+      
+      // Convert input based on type
+      if (type === 'Int') return `Integer.parseInt("${currentInput}")`;
+      if (type === 'Double') return `Double.parseDouble("${currentInput}")`;
+      if (type === 'Float') return `Float.parseFloat("${currentInput}")`;
+      if (type === 'Boolean') return `Boolean.parseBoolean("${currentInput}")`;
+      return `"${currentInput}"`; // Default to String
+    });
+  }
+
+  // Extract System.out.println statements
+  let output = '';
+  const printPattern = /System\.out\.println\s*\((.*)\)/g;
+  let printMatch;
+  
+  while ((printMatch = printPattern.exec(processedCode)) !== null) {
+    const content = printMatch[1].trim();
+    output += content + '\n';
+  }
+
+  return { output, exitCode: 0, status: 'success' };
+}
+
+/**
+ * Handle C++ code with input
+ */
+async function handleCppInput(code, input) {
+  // Replace cin with the actual input value
+  const cinPattern = /cin\s*>>\s*([\w]+)/g;
+  const inputs = input.split('\n');
+  let inputIndex = 0;
+  
+  let variables = {};
+  let processedCode = code.replace(cinPattern, (match, varName) => {
+    const currentInput = inputs[inputIndex] || '';
+    inputIndex++;
+    variables[varName] = currentInput;
+    return `/* cin >> ${varName} = ${currentInput} */`;
+  });
+
+  // Extract cout statements
+  let output = '';
+  const coutPattern = /cout\s*<<\s*([^;]+)/g;
+  let coutMatch;
+  
+  while ((coutMatch = coutPattern.exec(processedCode)) !== null) {
+    let content = coutMatch[1].trim();
+    
+    // Handle endl
+    content = content.replace(/\s*<<\s*endl/, '');
+    
+    // Handle string literals
+    if (content.startsWith('"') && content.endsWith('"')) {
+      content = content.substring(1, content.length - 1);
+    }
+    // Handle variable references
+    else if (variables[content]) {
+      content = variables[content];
+    }
+    
+    output += content + '\n';
+  }
+
+  return { output, exitCode: 0, status: 'success' };
+}
+
+/**
+ * Handle C code with input
+ */
+async function handleCInput(code, input) {
+  // Replace scanf with the actual input value
+  const scanfPattern = /scanf\s*\(["']([^"']+)["']\s*,\s*&([\w]+)\)/g;
+  const inputs = input.split('\n');
+  let inputIndex = 0;
+  
+  let variables = {};
+  let processedCode = code.replace(scanfPattern, (match, format, varName) => {
+    const currentInput = inputs[inputIndex] || '';
+    inputIndex++;
+    variables[varName] = currentInput;
+    return `/* scanf for ${varName} = ${currentInput} */`;
+  });
+
+  // Extract printf statements
+  let output = '';
+  const printfPattern = /printf\s*\(["']([^"']+)["'](?:,\s*([^)]*))?\)/g;
+  let printfMatch;
+  
+  while ((printfMatch = printfPattern.exec(processedCode)) !== null) {
+    let format = printfMatch[1];
+    const args = printfMatch[2] ? printfMatch[2].split(',').map(arg => arg.trim()) : [];
+    
+    // Replace format specifiers with variable values
+    let argIndex = 0;
+    format = format.replace(/%[diouxXfFeEgGaAcs]/g, () => {
+      const arg = args[argIndex++];
+      return variables[arg] || arg || '';
+    });
+    
+    output += format + '\n';
+  }
+
+  return { output, exitCode: 0, status: 'success' };
+}
+
+// Language configurations for mock execution
+const languageConfigs = {
+  javascript: {
+    extension: 'js',
+    filename: 'program.js',
+    inputHandler: handleJavaScriptInput
+  },
+  python: {
+    extension: 'py',
+    filename: 'program.py',
+    inputHandler: handlePythonInput
+  },
+  java: {
+    extension: 'java',
+    filename: 'Main.java',
+    inputHandler: handleJavaInput
+  },
+  cpp: {
+    extension: 'cpp',
+    filename: 'program.cpp',
+    inputHandler: handleCppInput
+  },
+  c: {
+    extension: 'c',
+    filename: 'program.c',
+    inputHandler: handleCInput
+  },
+  html: {
+    extension: 'html',
+    filename: 'index.html',
+    inputHandler: null
+  }
+};
+
+/**
  * Execute code without Docker (mock implementation)
  * @param {string} code - The code to execute
  * @param {string} language - The programming language
@@ -33,18 +315,53 @@ export async function executeCode(code, language, input = '') {
   console.log(`Input provided: ${input ? 'Yes' : 'No'}`);
   
   try {
+    // Get language configuration
+    const config = languageConfigs[language.toLowerCase()];
+    if (!config) {
+      throw new Error(`Unsupported language: ${language}`);
+    }
+    
+    // Create temp directory for this execution
+    const tempDir = path.join(__dirname, '..', 'temp', executionId);
+    await fs.mkdir(tempDir, { recursive: true });
+    
+    // Determine filename based on language
+    let filename;
+    if (language.toLowerCase() === 'java') {
+      // For Java, we need to extract the class name or use Main.java
+      const classNameMatch = code.match(/public\s+class\s+(\w+)/);
+      const className = classNameMatch ? classNameMatch[1] : 'Main';
+      filename = `${className}.java`;
+    } else {
+      filename = config.filename;
+    }
+    
+    console.log(`Mock: Writing code to file: ${filename}`);
+    
+    // Write code to file
+    const filePath = path.join(tempDir, filename);
+    await fs.writeFile(filePath, code);
+    
+    // Write input to file if provided
+    if (input) {
+      console.log('Mock: Writing input to file');
+      await fs.writeFile(path.join(tempDir, 'input.txt'), input);
+    }
+    
     // Simulate execution delay
     await new Promise(resolve => setTimeout(resolve, 1000));
     
-    // DIRECT PATCH: Check for the specific pattern we're having trouble with
+    // DIRECT PATCH for Python input handling - using a simpler, more reliable approach
     if (language.toLowerCase() === 'python') {
+      console.log('Using direct Python input handling');
+      
       // Check for the pattern: variable = input(...) followed by print statements
       const varInputPattern = /([\w]+)\s*=\s*input\s*\(([^)]*)\)/;
       const varMatch = code.match(varInputPattern);
       
-      if (varMatch) {
+      if (varMatch && input) {
         const varName = varMatch[1].trim();
-        console.log(`PATCH: Found input variable ${varName}`);
+        console.log(`Found input variable ${varName}`);
         
         // Extract prompt
         let prompt = '';
@@ -63,18 +380,15 @@ export async function executeCode(code, language, input = '') {
         
         while ((printMatch = printPattern.exec(code)) !== null) {
           const printContent = printMatch[1].trim();
-          console.log(`PATCH: Found print statement: ${printContent}`);
+          console.log(`Found print statement: ${printContent}`);
           printStatements.push(printContent);
         }
         
         if (printStatements.length > 0) {
           // Process each print statement
           const outputs = printStatements.map(content => {
-            console.log(`PATCH: Processing print content: ${content}`);
-            
             // Case 1: F-strings (handle these first)
             if (content.startsWith('f') && content.includes('{') && content.includes('}')) {
-              console.log('PATCH: Detected f-string');
               // Remove the 'f' prefix and quotes
               let fstring = content.substring(1);
               if ((fstring.startsWith('"') && fstring.endsWith('"')) || 
@@ -90,7 +404,6 @@ export async function executeCode(code, language, input = '') {
                 return match; // Keep other expressions unchanged
               });
               
-              console.log(`PATCH: Processed f-string result: ${result}`);
               return result;
             }
             
@@ -129,23 +442,115 @@ export async function executeCode(code, language, input = '') {
           });
           
           // Format the output
-          let outputText = `\n${prompt}\n${input}\n`;
+          let outputText = '';
+          if (prompt) {
+            outputText += prompt + '\n';
+          }
+          outputText += input + '\n';
+          
           outputs.forEach(out => {
-            outputText += `${out}\n`;
+            outputText += out + '\n';
           });
           
-          // Return the patched output
           return {
             executionId,
             status: 'success',
-            output: `${outputText}\n** Process exited - Return Code: 0 **\nPress Enter to exit terminal`,
+            output: outputText,
             exitCode: 0
           };
         }
+      } else if (!code.includes('input(')) {
+        // Simple Python code without input
+        let output = '';
+        
+        // Extract print statements
+        const printPattern = /print\s*\(([^)]*)\)/g;
+        let printMatch;
+        
+        while ((printMatch = printPattern.exec(code)) !== null) {
+          const content = printMatch[1].trim();
+          if ((content.startsWith('"') && content.endsWith('"')) || 
+              (content.startsWith("'") && content.endsWith("'"))) {
+            output += content.substring(1, content.length - 1) + '\n';
+          } else {
+            output += content + '\n';
+          }
+        }
+        
+        if (!output) {
+          output = 'No output generated\n';
+        }
+        
+        return {
+          executionId,
+          status: 'success',
+          output: output,
+          exitCode: 0
+        };
       }
     }
     
-    // If no patch was applied, proceed with normal execution
+    // For other languages or if Python special handling didn't apply
+    try {
+      let output = '';
+      
+      // Simple mock output based on language
+      if (language.toLowerCase() === 'python') {
+        // Extract print statements for Python
+        const printPattern = /print\s*\(([^)]*)\)/g;
+        const printMatches = [...code.matchAll(printPattern)];
+        
+        printMatches.forEach(match => {
+          const content = match[1].trim();
+          if ((content.startsWith('"') && content.endsWith('"')) || 
+              (content.startsWith('\'') && content.endsWith('\'')))
+          {
+            output += content.substring(1, content.length - 1) + '\n';
+          } else {
+            output += content + '\n';
+          }
+        });
+      } else if (language.toLowerCase() === 'javascript') {
+        // Extract console.log statements for JavaScript
+        const logPattern = /console\.log\s*\(([^)]*)\)/g;
+        const logMatches = [...code.matchAll(logPattern)];
+        
+        logMatches.forEach(match => {
+          const content = match[1].trim();
+          if ((content.startsWith('"') && content.endsWith('"')) || 
+              (content.startsWith('\'') && content.endsWith('\'')))
+          {
+            output += content.substring(1, content.length - 1) + '\n';
+          } else {
+            output += content + '\n';
+          }
+        });
+      } else {
+        // Default output for other languages
+        output = `Mock output for ${language} code\n`;
+      }
+      
+      if (!output) {
+        output = 'No output generated\n';
+      }
+      
+      return {
+        executionId,
+        status: 'success',
+        output: output,
+        exitCode: 0
+      };
+    } catch (error) {
+      console.error(`Error in mock execution:`, error);
+      return {
+        executionId,
+        status: 'error',
+        output: `Error: ${error.message}\n`,
+        exitCode: 1
+      };
+    }
+    
+    // Fallback for languages without specific handlers
     let output = '';
     let status = 'success';
     let exitCode = 0;

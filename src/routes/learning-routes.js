@@ -7,38 +7,53 @@ import axios from 'axios';
 
 const router = express.Router();
 
-// OpenAI API key for AI-powered code analysis
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+// OpenRouter API key for AI-powered code analysis using DeepSeek V3
+const OPENROUTER_API_KEY = process.env.OPENAI_API_KEY; // Using the same env variable for compatibility
 
 // In-memory storage for user progress (temporary solution)
 const userProgress = {};
 
 /**
  * Middleware to verify user authentication
+ * This is optional for public endpoints but required for user-specific data
  */
 const authenticateUser = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Authentication required' });
+      // Continue without authentication for public endpoints
+      req.user = null;
+      return next();
     }
     
     const token = authHeader.split(' ')[1];
-    const user = await verifyToken(token);
-    
-    req.user = user;
+    try {
+      const user = await verifyToken(token);
+      req.user = user;
+    } catch (tokenError) {
+      console.warn('Invalid token, continuing as anonymous user');
+      req.user = null;
+    }
     next();
   } catch (error) {
     console.error('Authentication error:', error);
-    res.status(401).json({ error: 'Invalid token' });
+    // Continue as anonymous user instead of returning an error
+    req.user = null;
+    next();
   }
 };
+
+/**
+ * Optional authentication middleware
+ * This allows both authenticated and anonymous users to access endpoints
+ */
+const optionalAuth = authenticateUser;
 
 /**
  * Get all learning paths with optional filtering
  * GET /api/learning/paths
  */
-router.get('/learning/paths', async (req, res) => {
+router.get('/learning/paths', authenticateUser, async (req, res) => {
   try {
     // Return sample learning paths
     res.json(getSampleLearningPaths());
@@ -52,7 +67,7 @@ router.get('/learning/paths', async (req, res) => {
  * Get a specific learning path by ID
  * GET /api/learning/paths/:id
  */
-router.get('/learning/paths/:id', async (req, res) => {
+router.get('/learning/paths/:id', authenticateUser, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -75,7 +90,7 @@ router.get('/learning/paths/:id', async (req, res) => {
  * Get a specific code challenge by ID
  * GET /api/learning/challenges/:id
  */
-router.get('/learning/challenges/:id', async (req, res) => {
+router.get('/learning/challenges/:id', authenticateUser, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -107,33 +122,47 @@ router.get('/learning/challenges/:id', async (req, res) => {
  * POST /api/learning/challenges/:id/submit
  * Body: { code }
  */
-router.post('/learning/challenges/:id/submit', authenticateUser, async (req, res) => {
+router.post('/learning/challenges/:id/submit', optionalAuth, async (req, res) => {
+  console.log('Received solution submission request for challenge:', req.params.id);
+  console.log('Authentication status:', req.user ? 'Authenticated' : 'Anonymous');
+  
   try {
     const { id } = req.params;
     const { code } = req.body;
     
+    console.log('Code received, length:', code ? code.length : 0, 'characters');
+    
     if (!code) {
+      console.log('Error: No code provided in the request');
       return res.status(400).json({ error: 'Code solution is required' });
     }
     
     // Find challenge in sample paths
+    console.log('Looking for challenge in sample learning paths');
     const samplePaths = getSampleLearningPaths();
+    console.log('Number of learning paths:', samplePaths.length);
+    
     let challenge = null;
     
     for (const path of samplePaths) {
-      const found = path.challenges.find(c => c.id === id);
+      console.log(`Checking path: ${path.id} with ${path.challenges ? path.challenges.length : 0} challenges`);
+      const found = path.challenges ? path.challenges.find(c => c.id === id) : null;
       if (found) {
         challenge = found;
+        console.log('Challenge found:', challenge.title);
         break;
       }
     }
     
     if (!challenge) {
+      console.log('Error: Challenge not found with ID:', id);
       return res.status(404).json({ error: 'Challenge not found' });
     }
     
     // Analyze the code and provide feedback
+    console.log('Analyzing code for challenge:', challenge.title);
     const feedback = await analyzeCode(code, challenge);
+    console.log('Feedback generated:', feedback ? 'success' : 'failure');
     
     // Update user progress if solution is correct
     if (feedback.score >= 70) {
@@ -254,13 +283,39 @@ router.post('/learning/suggestions', async (req, res) => {
  * Analyze code and provide feedback
  */
 async function analyzeCode(code, challenge) {
-  // If OpenAI API key is available, use it for advanced analysis
-  if (OPENAI_API_KEY) {
+  console.log('Starting code analysis for challenge:', challenge.id);
+  
+  // Basic code validation
+  if (!code || code.trim().length === 0) {
+    console.log('Empty code submission detected');
+    return {
+      score: 0,
+      suggestions: ['Your solution is empty. Please write some code to solve the challenge.'],
+      conceptsApplied: [],
+      conceptsMissing: challenge.concepts,
+      timeComplexity: 'N/A',
+      spaceComplexity: 'N/A',
+      readabilityScore: 0,
+      bestPractices: {
+        followed: [],
+        missed: ['Code implementation']
+      }
+    };
+  }
+  
+  console.log('Code validation passed, proceeding with analysis');
+
+  // Check if code contains expected patterns based on the challenge
+  const basicScore = calculateBasicScore(code, challenge);
+  
+  // If OpenRouter API key is available, use it for advanced analysis with DeepSeek V3
+  if (OPENROUTER_API_KEY) {
     try {
+      console.log('Using OpenRouter API with DeepSeek V3 for code analysis');
       const response = await axios.post(
-        'https://api.openai.com/v1/chat/completions',
+        'https://openrouter.ai/api/v1/chat/completions',
         {
-          model: 'gpt-3.5-turbo',
+          model: 'deepseek/deepseek-v3-0324',
           messages: [
             {
               role: 'system',
@@ -289,7 +344,9 @@ async function analyzeCode(code, challenge) {
         },
         {
           headers: {
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+            'HTTP-Referer': 'https://online-code-editor-mu-mauve.vercel.app/', // Replace with your site URL
+            'X-Title': 'Online Compiler - AI Learning Companion',
             'Content-Type': 'application/json'
           }
         }
@@ -311,36 +368,291 @@ async function analyzeCode(code, challenge) {
   }
   
   // Fallback: Simplified analysis without AI
-  return {
-    score: Math.floor(Math.random() * 30) + 70, // Random score between 70-100
-    suggestions: [
-      'Consider adding more comments to explain your logic.',
-      'Try to use more descriptive variable names.',
-      'Look for opportunities to refactor repeated code into functions.'
-    ],
-    conceptsApplied: challenge.concepts.slice(0, Math.floor(challenge.concepts.length * 0.7)),
-    conceptsMissing: challenge.concepts.slice(Math.floor(challenge.concepts.length * 0.7)),
-    timeComplexity: 'O(n)',
-    spaceComplexity: 'O(n)',
-    readabilityScore: 75,
-    bestPractices: {
-      followed: ['Proper indentation', 'Consistent naming convention'],
-      missed: ['Missing function documentation', 'Could use more modular approach']
+  console.log('Using fallback analysis method');
+  const fallbackResult = generateFallbackAnalysis(code, challenge, basicScore);
+  console.log('Fallback analysis complete, returning result');
+  return fallbackResult;
+}
+
+/**
+ * Calculate a basic score based on pattern matching
+ */
+function calculateBasicScore(code, challenge) {
+  let score = 50; // Start with a base score
+  
+  // Check if code contains expected keywords based on language
+  const languagePatterns = {
+    javascript: {
+      keywords: ['function', 'return', 'const', 'let', 'var', 'if', 'for', 'while'],
+      goodPractices: ['const', '=>', '===', '!=='],
+      badPractices: ['==', '!=', 'var']
+    },
+    python: {
+      keywords: ['def', 'return', 'if', 'for', 'while', 'import'],
+      goodPractices: ['__main__', 'if __name__', 'with'],
+      badPractices: ['exec', 'eval']
+    },
+    java: {
+      keywords: ['class', 'public', 'private', 'static', 'void', 'return'],
+      goodPractices: ['@Override', 'final', 'try', 'catch'],
+      badPractices: ['System.exit', 'Thread.sleep']
     }
   };
+  
+  const patterns = languagePatterns[challenge.language] || languagePatterns.javascript;
+  
+  // Check for keywords
+  patterns.keywords.forEach(keyword => {
+    if (code.includes(keyword)) {
+      score += 2;
+    }
+  });
+  
+  // Check for good practices
+  patterns.goodPractices.forEach(practice => {
+    if (code.includes(practice)) {
+      score += 3;
+    }
+  });
+  
+  // Check for bad practices
+  patterns.badPractices.forEach(practice => {
+    if (code.includes(practice)) {
+      score -= 2;
+    }
+  });
+  
+  // Check for concepts from the challenge
+  challenge.concepts.forEach(concept => {
+    // Simple pattern matching for concepts
+    if (code.toLowerCase().includes(concept.toLowerCase())) {
+      score += 5;
+    }
+  });
+  
+  // Adjust score based on code length (too short might be incomplete)
+  if (code.length < 50) {
+    score -= 10;
+  }
+  
+  // Cap score between 40 and 95 (leaving room for AI to provide more accurate scoring)
+  return Math.min(95, Math.max(40, score));
+}
+
+/**
+ * Generate fallback analysis without using AI
+ */
+function generateFallbackAnalysis(code, challenge, basicScore) {
+  // Determine which concepts might be applied based on simple pattern matching
+  const conceptsApplied = [];
+  const conceptsMissing = [];
+  
+  challenge.concepts.forEach(concept => {
+    if (code.toLowerCase().includes(concept.toLowerCase())) {
+      conceptsApplied.push(concept);
+    } else {
+      conceptsMissing.push(concept);
+    }
+  });
+  
+  // Generate custom suggestions based on the code and challenge
+  const suggestions = [];
+  
+  // Add language-specific suggestions
+  if (challenge.language === 'javascript') {
+    if (!code.includes('const') && !code.includes('let')) {
+      suggestions.push('Consider using const or let instead of var for better variable scoping.');
+    }
+    if (code.includes('==') || code.includes('!=')) {
+      suggestions.push('Use === and !== instead of == and != to avoid type coercion issues.');
+    }
+  } else if (challenge.language === 'python') {
+    if (!code.includes('def ')) {
+      suggestions.push('Consider organizing your code into functions using the def keyword.');
+    }
+    if (code.includes('print') && !code.includes('__main__')) {
+      suggestions.push('Consider using if __name__ == "__main__": for better script organization.');
+    }
+  }
+  
+  // Add general suggestions
+  if (!code.includes('//') && !code.includes('/*') && !code.includes('#')) {
+    suggestions.push('Add comments to explain your logic and make your code more readable.');
+  }
+  
+  if (code.split('\n').length < 5) {
+    suggestions.push('Consider breaking your solution into smaller, more manageable parts.');
+  }
+  
+  // Ensure we have at least 3 suggestions
+  const defaultSuggestions = [
+    'Consider adding more comments to explain your logic.',
+    'Try to use more descriptive variable names.',
+    'Look for opportunities to refactor repeated code into functions.'
+  ];
+  
+  while (suggestions.length < 3) {
+    const suggestion = defaultSuggestions[suggestions.length];
+    if (suggestion) {
+      suggestions.push(suggestion);
+    } else {
+      break;
+    }
+  }
+  
+  // Calculate readability score based on comments, line length, and indentation
+  let readabilityScore = 60; // Base score
+  
+  // Check for comments
+  if (code.includes('//') || code.includes('/*') || code.includes('#')) {
+    readabilityScore += 10;
+  }
+  
+  // Check for reasonable line lengths
+  const lines = code.split('\n');
+  const longLines = lines.filter(line => line.length > 80).length;
+  if (longLines === 0) {
+    readabilityScore += 10;
+  } else {
+    readabilityScore -= longLines * 2;
+  }
+  
+  // Check for consistent indentation
+  const indentationPattern = lines.map(line => line.match(/^\s*/)[0].length);
+  const uniqueIndentations = new Set(indentationPattern).size;
+  if (uniqueIndentations <= 4) {
+    readabilityScore += 10;
+  } else {
+    readabilityScore -= (uniqueIndentations - 4) * 5;
+  }
+  
+  // Cap readability score
+  readabilityScore = Math.min(100, Math.max(0, readabilityScore));
+  
+  return {
+    score: basicScore,
+    suggestions,
+    conceptsApplied,
+    conceptsMissing,
+    timeComplexity: estimateTimeComplexity(code),
+    spaceComplexity: estimateSpaceComplexity(code),
+    readabilityScore,
+    bestPractices: {
+      followed: generateFollowedPractices(code, challenge.language),
+      missed: generateMissedPractices(code, challenge.language)
+    }
+  };
+}
+
+/**
+ * Estimate time complexity based on code patterns
+ */
+function estimateTimeComplexity(code) {
+  if (code.includes('for') && code.includes('for') && code.match(/for.*for/s)) {
+    return 'O(n²)'; // Nested loops suggest quadratic complexity
+  } else if (code.includes('for') || code.includes('while') || code.includes('forEach') || code.includes('map')) {
+    return 'O(n)'; // Single loop suggests linear complexity
+  } else {
+    return 'O(1)'; // No loops suggest constant complexity
+  }
+}
+
+/**
+ * Estimate space complexity based on code patterns
+ */
+function estimateSpaceComplexity(code) {
+  if (code.includes('new Array') || code.includes('[]') || code.includes('new Map') || 
+      code.includes('new Set') || code.includes('{}')) {
+    if (code.includes('for') && (code.includes('push') || code.includes('append'))) {
+      return 'O(n)'; // Creating and filling data structures suggests linear space
+    }
+  }
+  return 'O(1)'; // Default to constant space
+}
+
+/**
+ * Generate list of followed best practices
+ */
+function generateFollowedPractices(code, language) {
+  const practices = [];
+  
+  // Check for common good practices
+  if (code.includes('//') || code.includes('/*') || code.includes('#')) {
+    practices.push('Code includes comments');
+  }
+  
+  if (code.split('\n').length > 3) {
+    practices.push('Code is organized into multiple lines');
+  }
+  
+  // Language-specific practices
+  if (language === 'javascript') {
+    if (code.includes('const') || code.includes('let')) {
+      practices.push('Uses modern variable declarations (const/let)');
+    }
+    if (code.includes('=>')) {
+      practices.push('Uses arrow functions');
+    }
+  } else if (language === 'python') {
+    if (code.includes('def ')) {
+      practices.push('Uses function definitions');
+    }
+  }
+  
+  // Add default practices if none detected
+  if (practices.length === 0) {
+    practices.push('Proper indentation');
+    practices.push('Consistent naming convention');
+  }
+  
+  return practices;
+}
+
+/**
+ * Generate list of missed best practices
+ */
+function generateMissedPractices(code, language) {
+  const practices = [];
+  
+  // Check for common missed practices
+  if (!code.includes('//') && !code.includes('/*') && !code.includes('#')) {
+    practices.push('Missing comments');
+  }
+  
+  // Language-specific missed practices
+  if (language === 'javascript') {
+    if (code.includes('var')) {
+      practices.push('Uses var instead of const/let');
+    }
+    if (code.includes('==') || code.includes('!=')) {
+      practices.push('Uses loose equality operators (== or !=)');
+    }
+  } else if (language === 'python') {
+    if (!code.includes('def ') && code.length > 100) {
+      practices.push('Code not organized into functions');
+    }
+  }
+  
+  // Add default practices if none detected
+  if (practices.length === 0) {
+    practices.push('Could improve variable naming');
+    practices.push('Could add more documentation');
+  }
+  
+  return practices;
 }
 
 /**
  * Generate code suggestions using AI or fallback to predefined suggestions
  */
 async function getCodeSuggestions(code, language) {
-  // If OpenAI API key is available, use it for personalized suggestions
-  if (OPENAI_API_KEY) {
+  // If OpenRouter API key is available, use it for personalized suggestions with DeepSeek V3
+  if (OPENROUTER_API_KEY) {
     try {
       const response = await axios.post(
-        'https://api.openai.com/v1/chat/completions',
+        'https://openrouter.ai/api/v1/chat/completions',
         {
-          model: 'gpt-3.5-turbo',
+          model: 'deepseek/deepseek-v3-0324',
           messages: [
             {
               role: 'system',
@@ -357,7 +669,9 @@ async function getCodeSuggestions(code, language) {
         },
         {
           headers: {
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+            'HTTP-Referer': 'https://online-code-editor-mu-mauve.vercel.app/', // Replace with your site URL
+            'X-Title': 'Online Compiler - AI Learning Companion',
             'Content-Type': 'application/json'
           }
         }

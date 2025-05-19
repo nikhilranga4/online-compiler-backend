@@ -71,22 +71,35 @@ app.post('/api/execute', async (req, res) => {
     
     const executionId = uuidv4();
     
-    // Send initial response with execution ID
-    res.status(202).json({ 
-      executionId,
-      message: 'Code execution started' 
-    });
-    
-    console.log(`Executing ${language} code with input: ${input ? 'provided' : 'none'}`);
-    
-    // Execute code asynchronously with user input
-    const result = await executeCode(code, language, input);
-    
-    // Result will be sent via WebSocket
-    io.to(executionId).emit('execution_result', result);
+    // Execute code with input and get result immediately
+    try {
+      console.log(`Executing ${language} code with input: ${input ? 'provided' : 'none'}`);
+      console.log('Code snippet:', code.substring(0, 50) + (code.length > 50 ? '...' : ''));
+      
+      // Execute code with user input
+      const result = await executeCode(code, language, input);
+      
+      // Send response with execution ID and result
+      res.status(200).json({ 
+        executionId,
+        message: 'Code execution completed',
+        result: result
+      });
+      
+      // Also emit via WebSocket for clients that are listening
+      io.to(executionId).emit('execution_result', result);
+    } catch (execError) {
+      console.error('Error during code execution:', execError);
+      // Send error response
+      return res.status(500).json({ 
+        error: 'Code execution failed', 
+        message: execError.message,
+        executionId
+      });
+    }
   } catch (error) {
-    console.error('Error executing code:', error);
-    res.status(500).json({ error: 'Failed to execute code' });
+    console.error('Error processing execute request:', error);
+    res.status(500).json({ error: 'Failed to process execute request' });
   }
 });
 

@@ -22,31 +22,48 @@ const languageConfigs = {
   javascript: {
     image: 'node:16-alpine',
     extension: 'js',
+    filename: 'program.js',
     command: ['node', '/code/program.js'],
+    inputCommand: ['bash', '-c', 'cat /code/input.txt | node /code/program.js'],
     workDir: '/code'
   },
   python: {
     image: 'python:3.9-alpine',
     extension: 'py',
+    filename: 'program.py',
     command: ['python', '/code/program.py'],
+    inputCommand: ['bash', '-c', 'cat /code/input.txt | python /code/program.py'],
     workDir: '/code'
   },
   java: {
     image: 'openjdk:11-jdk-slim',
     extension: 'java',
+    filename: 'Main.java',
     command: ['bash', '-c', 'cd /code && javac Main.java && java Main'],
+    inputCommand: ['bash', '-c', 'cd /code && javac Main.java && cat input.txt | java Main'],
     workDir: '/code'
   },
   cpp: {
     image: 'gcc:latest',
     extension: 'cpp',
+    filename: 'program.cpp',
     command: ['bash', '-c', 'cd /code && g++ -o program program.cpp && ./program'],
+    inputCommand: ['bash', '-c', 'cd /code && g++ -o program program.cpp && cat input.txt | ./program'],
     workDir: '/code'
   },
   c: {
     image: 'gcc:latest',
     extension: 'c',
+    filename: 'program.c',
     command: ['bash', '-c', 'cd /code && gcc -o program program.c && ./program'],
+    inputCommand: ['bash', '-c', 'cd /code && gcc -o program program.c && cat input.txt | ./program'],
+    workDir: '/code'
+  },
+  html: {
+    image: 'nginx:alpine',
+    extension: 'html',
+    filename: 'index.html',
+    command: ['echo', 'HTML files are for preview only'],
     workDir: '/code'
   }
 };
@@ -80,14 +97,17 @@ export async function executeCode(code, language, input = '') {
       const className = classNameMatch ? classNameMatch[1] : 'Main';
       filename = `${className}.java`;
     } else {
-      filename = `program.${config.extension}`;
+      filename = config.filename || `program.${config.extension}`;
     }
+    
+    console.log(`Writing code to file: ${filename}`);
     
     // Write code to file
     await fs.writeFile(path.join(tempDir, filename), code);
     
     // Write input to file if provided
     if (input) {
+      console.log('Writing input to file');
       await fs.writeFile(path.join(tempDir, 'input.txt'), input);
     }
     
@@ -99,10 +119,10 @@ export async function executeCode(code, language, input = '') {
       await pullImage(config.image);
     }
     
-    // Create and run container
-    const container = await docker.createContainer({
+    // Create and run container with appropriate command based on input
+    const containerConfig = {
       Image: config.image,
-      Cmd: config.command,
+      Cmd: input && config.inputCommand ? config.inputCommand : config.command,
       WorkingDir: config.workDir,
       HostConfig: {
         Binds: [`${tempDir}:/code`],
@@ -112,19 +132,24 @@ export async function executeCode(code, language, input = '') {
         CpuPeriod: 100000, // CPU quota period in microseconds
         CpuQuota: 50000, // CPU quota (50% of CPU)
         PidsLimit: 50, // Limit number of processes
-        ReadonlyRootfs: true, // Read-only root filesystem
+        ReadonlyRootfs: false, // Need write access for compilation
         AutoRemove: true // Automatically remove container when it exits
       },
       Tty: false,
       OpenStdin: true,
       StdinOnce: true
-    });
+    };
+    
+    console.log(`Creating container with command: ${JSON.stringify(containerConfig.Cmd)}`);
+    const container = await docker.createContainer(containerConfig);
     
     // Start the container
+    console.log('Starting container');
     await container.start();
     
-    // Write input to container stdin if provided
-    if (input) {
+    // Only attach and write input if we're not using the inputCommand approach
+    if (input && !config.inputCommand) {
+      console.log('Attaching to container and writing input');
       const stream = await container.attach({ stream: true, stdin: true, stdout: true, stderr: true });
       stream.write(input);
       stream.end();
