@@ -737,15 +737,15 @@ async function getCodeSuggestions(code, language) {
 function getSampleLearningPaths() {
   return [
     {
-      id: 'py-basics',
-      title: 'Python Basics',
-      description: 'Get started with Python programming through hands-on challenges.',
+      id: 'py-fundamentals',
+      title: 'Python Fundamentals',
+      description: 'Learn Python programming fundamentals with hands-on exercises and challenges.',
       language: 'python',
       level: 'beginner',
       prerequisites: [],
-      estimatedHours: 8,
-      concepts: ['variables', 'data types', 'functions', 'conditionals', 'loops', 'lists', 'dictionaries'],
-      badgeUrl: 'https://img.shields.io/badge/Python-Basics-blue',
+      estimatedHours: 20,
+      concepts: ['variables', 'data types', 'functions', 'conditionals', 'loops', 'lists', 'dictionaries', 'file handling', 'error handling', 'modules'],
+      badgeUrl: 'https://img.shields.io/badge/Python-Fundamentals-blue',
       challenges: [
         {
           id: 'py-hello-world',
