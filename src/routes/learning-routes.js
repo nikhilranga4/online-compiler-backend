@@ -646,9 +646,14 @@ function generateMissedPractices(code, language) {
  * Generate code suggestions using AI or fallback to predefined suggestions
  */
 async function getCodeSuggestions(code, language) {
-  // If OpenRouter API key is available, use it for personalized suggestions with DeepSeek V3
-  if (OPENROUTER_API_KEY) {
+  // Normalize language to lowercase for consistency
+  const normalizedLanguage = language.toLowerCase();
+  
+  // Only attempt API call if we have a key and the language is supported
+  if (OPENROUTER_API_KEY && ['python', 'javascript', 'java', 'html'].includes(normalizedLanguage)) {
     try {
+      console.log(`Attempting to get AI suggestions for ${normalizedLanguage} code`);
+      
       const response = await axios.post(
         'https://openrouter.ai/api/v1/chat/completions',
         {
@@ -656,7 +661,7 @@ async function getCodeSuggestions(code, language) {
           messages: [
             {
               role: 'system',
-              content: `You are a coding assistant for beginners. The user is learning ${language}. 
+              content: `You are a coding assistant for beginners. The user is learning ${normalizedLanguage}. 
               Provide 3 specific, actionable suggestions to improve their code. 
               Each suggestion should be concise (max 100 characters) and focus on a different aspect 
               (e.g., readability, efficiency, best practices).`
@@ -670,18 +675,28 @@ async function getCodeSuggestions(code, language) {
         {
           headers: {
             'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-            'HTTP-Referer': 'https://online-code-editor-mu-mauve.vercel.app/', // Replace with your site URL
+            'HTTP-Referer': 'https://online-code-editor-mu-mauve.vercel.app/',
             'X-Title': 'Online Compiler - AI Learning Companion',
             'Content-Type': 'application/json'
-          }
+          },
+          timeout: 5000 // 5 second timeout to prevent long waits
         }
       );
       
-      const content = response.data.choices[0].message.content;
-      // Extract suggestions (one per line)
-      return content.split('\n').filter(line => line.trim().length > 0).slice(0, 3);
+      if (response.data && response.data.choices && response.data.choices.length > 0) {
+        const content = response.data.choices[0].message.content;
+        // Extract suggestions (one per line)
+        const aiSuggestions = content.split('\n')
+          .filter(line => line.trim().length > 0)
+          .map(line => line.replace(/^\d+\.\s*/, '').trim()) // Remove numbering if present
+          .slice(0, 3);
+          
+        console.log('Successfully generated AI suggestions');
+        return aiSuggestions;
+      }
     } catch (error) {
       console.error('Error calling OpenAI API for suggestions:', error);
+      // Continue to fallback suggestions
     }
   }
   
@@ -721,74 +736,6 @@ async function getCodeSuggestions(code, language) {
  */
 function getSampleLearningPaths() {
   return [
-    {
-      id: 'js-fundamentals',
-      title: 'JavaScript Fundamentals',
-      description: 'Learn the basics of JavaScript programming with interactive challenges.',
-      language: 'javascript',
-      level: 'beginner',
-      prerequisites: [],
-      estimatedHours: 10,
-      concepts: ['variables', 'data types', 'functions', 'conditionals', 'loops', 'arrays', 'objects'],
-      badgeUrl: 'https://img.shields.io/badge/JavaScript-Fundamentals-yellow',
-      challenges: [
-        {
-          id: 'js-variables',
-          title: 'Working with Variables',
-          description: 'Learn how to declare and use variables in JavaScript.',
-          difficulty: 'beginner',
-          language: 'javascript',
-          starterCode: '// Declare a variable named "greeting" and assign it the value "Hello, World!"\n// Then log it to the console\n\n// Your code here\n',
-          solutionCode: 'const greeting = "Hello, World!";\nconsole.log(greeting);',
-          testCases: [
-            {
-              input: '',
-              expectedOutput: 'Hello, World!',
-              isHidden: false,
-              explanation: 'Your code should output "Hello, World!" to the console.'
-            }
-          ],
-          hints: [
-            'Use const, let, or var to declare a variable.',
-            'Assign a string value using quotes.',
-            'Use console.log() to output to the console.'
-          ],
-          concepts: ['variables', 'strings', 'console output'],
-          timeEstimate: 10
-        },
-        {
-          id: 'js-functions',
-          title: 'Creating Functions',
-          description: 'Learn how to create and call functions in JavaScript.',
-          difficulty: 'beginner',
-          language: 'javascript',
-          starterCode: '// Create a function called "add" that takes two parameters and returns their sum\n// Then call it with 5 and 3\n\n// Your code here\n',
-          solutionCode: 'function add(a, b) {\n  return a + b;\n}\n\nconsole.log(add(5, 3));',
-          testCases: [
-            {
-              input: '5, 3',
-              expectedOutput: '8',
-              isHidden: false,
-              explanation: 'Your function should return the sum of 5 and 3, which is 8.'
-            },
-            {
-              input: '10, -2',
-              expectedOutput: '8',
-              isHidden: true,
-              explanation: 'Your function should handle negative numbers.'
-            }
-          ],
-          hints: [
-            'Use the "function" keyword followed by the function name.',
-            'Parameters go inside parentheses ().',
-            'The function body goes inside curly braces {}.',
-            'Use the "return" keyword to return a value.'
-          ],
-          concepts: ['functions', 'parameters', 'return values'],
-          timeEstimate: 15
-        }
-      ]
-    },
     {
       id: 'py-basics',
       title: 'Python Basics',
@@ -847,6 +794,73 @@ function getSampleLearningPaths() {
           ],
           concepts: ['lists', 'methods', 'print function'],
           timeEstimate: 10
+        }
+      ]
+    },
+    {
+      id: 'py-data-structures',
+      title: 'Python Data Structures',
+      description: 'Learn essential data structures and algorithms with Python.',
+      language: 'python',
+      level: 'intermediate',
+      prerequisites: ['py-basics'],
+      estimatedHours: 12,
+      concepts: ['lists', 'dictionaries', 'sets', 'tuples', 'algorithms', 'sorting', 'searching'],
+      badgeUrl: 'https://img.shields.io/badge/Python-Data_Structures-blue',
+      challenges: [
+        {
+          id: 'py-list-operations',
+          title: 'List Operations',
+          description: 'Practice common list operations in Python.',
+          difficulty: 'intermediate',
+          language: 'python',
+          starterCode: '# Create a function that finds the second largest number in a list\n# Example: find_second_largest([5, 2, 8, 1, 9]) should return 8\n\ndef find_second_largest(numbers):\n    # Your code here\n    pass\n\n# Test your function\nprint(find_second_largest([5, 2, 8, 1, 9]))\n',
+          solutionCode: 'def find_second_largest(numbers):\n    if len(numbers) < 2:\n        return None\n    # Sort the list in descending order\n    sorted_numbers = sorted(numbers, reverse=True)\n    # Return the second element\n    return sorted_numbers[1]\n\n# Test your function\nprint(find_second_largest([5, 2, 8, 1, 9]))\n',
+          testCases: [
+            {
+              input: '[5, 2, 8, 1, 9]',
+              expectedOutput: '8',
+              isHidden: false,
+              explanation: 'The largest number is 9, so the second largest is 8.'
+            },
+            {
+              input: '[3, 3, 3]',
+              expectedOutput: '3',
+              isHidden: true,
+              explanation: 'When there are duplicates, the second largest is the same as the largest.'
+            }
+          ],
+          hints: [
+            'Consider sorting the list first.',
+            'Remember to handle edge cases like empty lists or lists with only one element.',
+            'What if there are duplicate values in the list?'
+          ],
+          concepts: ['lists', 'sorting', 'algorithms'],
+          timeEstimate: 15
+        },
+        {
+          id: 'py-dictionary-usage',
+          title: 'Dictionary Usage',
+          description: 'Learn how to use dictionaries for efficient data lookup.',
+          difficulty: 'intermediate',
+          language: 'python',
+          starterCode: '# Create a function that counts the frequency of each word in a string\n# Example: word_frequency("hello world hello") should return {"hello": 2, "world": 1}\n\ndef word_frequency(text):\n    # Your code here\n    pass\n\n# Test your function\nprint(word_frequency("hello world hello"))\n',
+          solutionCode: 'def word_frequency(text):\n    words = text.lower().split()\n    frequency = {}\n    \n    for word in words:\n        if word in frequency:\n            frequency[word] += 1\n        else:\n            frequency[word] = 1\n            \n    return frequency\n\n# Test your function\nprint(word_frequency("hello world hello"))\n',
+          testCases: [
+            {
+              input: '"hello world hello"',
+              expectedOutput: '{"hello": 2, "world": 1}',
+              isHidden: false,
+              explanation: 'The word "hello" appears twice and "world" appears once.'
+            }
+          ],
+          hints: [
+            'Split the string into words using the split() method.',
+            'Use a dictionary to keep track of word counts.',
+            'Consider converting all words to lowercase for case-insensitive counting.'
+          ],
+          concepts: ['dictionaries', 'strings', 'loops'],
+          timeEstimate: 20
         }
       ]
     }
